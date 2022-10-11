@@ -220,10 +220,8 @@ getEvapotranspiration <- function(temp, pres, shum, wind, srad, lrad, lai, alb, 
   
   # PML procedure 
   Qh <- srad * 0.45 # flux density of visible radiation at the top of the canopy (approximately half of incoming solar radiation)
-  
   Gc <- gsx / kQ * log((Qh + Q50) / (Qh * exp(-kQ * lai) + Q50)) / (1 + delta / D50) # canopy conductance (m/s)
   Gc[Gc < 1e-6] <- 1e-6
-  # 
   # hc <- 8 # canopy height
   d <- hc * 2 / 3 # zero plane displacement height (m)
   zom <- 0.123 * hc # roughness lengths governing transfer
