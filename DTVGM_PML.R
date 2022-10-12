@@ -24,7 +24,7 @@
 #' @param para   list, model parameters fer0	sls	hc	gsx	cmelt	g1	g2	ks	kr	kg	wm
 #' @param W_init double, Degree-day factor, a melt factor of daily snowmelt when warm enough to melt.
 #' @param G_init double, Initial snowpack 
-#' @return list, water balance variables including 'P', 'E', 'R', 'Pe', 'Rs', 'Rss', 'Rg', 'Ei', 'Ec', 'Es', 'W', 'G'  
+#' @return list, water balance variables including 'P', 'E', 'R', 'P2', 'Rs', 'Rss', 'Rg', 'Ei', 'Ec', 'Es', 'W', 'G', 'PET'  
 #' DTVGM_PML
 DTVGM_PML <- function(data, para, W_init = 0, G_init = 0) {
   # initialization 
@@ -71,6 +71,7 @@ DTVGM_PML <- function(data, para, W_init = 0, G_init = 0) {
   e <- getEvapotranspiration(temp, pres, shum, wind, srad, lrad, lai, alb, gsx, hc)
   Ec <- e$Ec
   Es_eq <- e$Es_eq
+  PET <- e$PET
   
   # runoff routine
   pe <- pr - Ei + sm  # rainfall and snowmelt down into soil
@@ -82,8 +83,12 @@ DTVGM_PML <- function(data, para, W_init = 0, G_init = 0) {
     
     # surface runoff
     g <- g1 * fval_soil ^ g2
-    g <- ifelse(g > 1, 1, g)
-    Rs[i] <- ifelse(pe[i] < et, 0, pe[i] * g)
+    g <- min(g, 1)  # ifelse(g > 1, 1, g)
+    # Rs[i] <- ifelse(pe[i] < et, 0, pe[i] * g)
+    if (pe[i] < et)
+      Rs[i] <- 0
+    else
+      Rs[i] <- pe[i] * g
     
     inf <- pe[i] - Rs[i]                  # infiltration
     Rss[i] <- ks * inf * fval_soil        # interflow
@@ -110,7 +115,7 @@ DTVGM_PML <- function(data, para, W_init = 0, G_init = 0) {
   R <- Rs + Rss + Rg  # total runoff
   E <- Ei + Ec + Es   # total evapotranspiration 
   
-  out <- data.frame(P=prec, E, R, P2=pr+sm, Rs, Rss, Rg, Ei, Ec, Es, W=W[1:n], G=G[1:n])
+  out <- data.frame(P=prec, E, R, P2=pr+sm, Rs, Rss, Rg, Ei, Ec, Es, W=W[1:n], G=G[1:n], PET)
   return(out)
 }
 
@@ -140,7 +145,12 @@ getSnowmelt <- function(ps, temp, cmelt, spk_init=0, rsm_init=0, tt=0, cwh=0.1, 
       smt <- min(spk[i] + ps[i], cmelt * (temp[i] - tt))
       spk[i + 1] <- spk[i] + ps[i] - smt
       rsm[i + 1] <- rsm[i] + smt
-      smtd[i] <- ifelse(rsm[i + 1] > cwh * spk[i + 1], rsm[i + 1] - cwh * spk[i + 1],  0)
+      # smtd[i] <- ifelse(rsm[i + 1] > cwh * spk[i + 1], rsm[i + 1] - cwh * spk[i + 1],  0)
+      tmp <- rsm[i + 1] - cwh * spk[i + 1]
+      if (tmp > 0)
+        smtd[i] <- tmp
+      else
+        smtd[i] <- 0
       rsm[i+1] <- rsm[i+1] - smtd[i]
     } else {  # refreezing meltwater
       rmw <- min(rsm[i], cfr * cmelt * (tt - temp[i]))
@@ -186,7 +196,7 @@ getInterceptEvap <- function(pr, lai, fER0, s_sls, lairef = 5) {
 #' @param alb  vector, Albedo
 #' @param gsx  double, Maximum stomatal conductance of leaves at the top of the canopy [0.003-0.01] (m/s)
 #' @param hc   double, Canopy height
-#' @return list, Transpiration and soil evaporation at equilibrium
+#' @return list, Transpiration, soil evaporation at equilibrium, and potential evapotranspitation
 #' The soil evaporation is calculated as fval_soil * Es_eq with fval_soil = W/Wm in DTVGM water balance procedure
 #' getEvapotranspiration()
 getEvapotranspiration <- function(temp, pres, shum, wind, srad, lrad, lai, alb, gsx, hc) {
@@ -208,7 +218,7 @@ getEvapotranspiration <- function(temp, pres, shum, wind, srad, lrad, lai, alb, 
   vpd <- vs - va
   rou_a <- 1.293 * 273 / (273 + temp) * pres / 101.3  # density of air [kg/m3]
   gamma <- 0.00163 * pres / lambda  # psychrometric constant (S2.9)
-  delta <- 4098 * (0.6108 * exp((17.27 * temp)/(temp+237.3))) / ((temp + 237.3)^2)  # slope of vapour pressure curve (S2.4)
+  delta <- 4098 * vs / ((temp + 237.3)^2)  # slope of vapour pressure curve (S2.4)
   
   # Radiation calculation
   fv <- 1 - exp(-lai / lai_ref)       # vegetation fractional cover
@@ -218,10 +228,16 @@ getEvapotranspiration <- function(temp, pres, shum, wind, srad, lrad, lai, alb, 
   Rn <- Rns + Rnl
   Rn[Rn<0] <- 0
   
+  # estimate daily FAO-56 reference crop evapotranspiration
+  u2 <- wind * 4.87 / (log(67.8 * Zob - 5.42))
+  pet <- (0.408 * delta * Rn + gamma * 900 / (temp + 273) * u2 * vpd) / (delta+gamma*(1+0.34*u2))
+  
   # PML procedure 
   Qh <- srad * 0.45 # flux density of visible radiation at the top of the canopy (approximately half of incoming solar radiation)
+  
   Gc <- gsx / kQ * log((Qh + Q50) / (Qh * exp(-kQ * lai) + Q50)) / (1 + delta / D50) # canopy conductance (m/s)
   Gc[Gc < 1e-6] <- 1e-6
+  # 
   # hc <- 8 # canopy height
   d <- hc * 2 / 3 # zero plane displacement height (m)
   zom <- 0.123 * hc # roughness lengths governing transfer
@@ -246,5 +262,5 @@ getEvapotranspiration <- function(temp, pres, shum, wind, srad, lrad, lai, alb, 
   Eca <- LEca / lambda
   Ec <- LEc / lambda
   # Es <- Es_eq * fval_soil
-  return(list(Ec=Ec, Es_eq=Es_eq))
+  return(list(Ec = Ec, Es_eq = Es_eq, PET = pet))
 }
