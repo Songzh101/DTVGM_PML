@@ -22,8 +22,8 @@
 #' Hydrological simulation by DTVGM-PML
 #' @param data   data.frame, forcing data including prec, temp, pres, shum, wind, srad, lrad, lai, alb
 #' @param para   list, model parameters fer0	sls	hc	gsx	cmelt	g1	g2	ks	kr	kg	wm
-#' @param W_init double, Degree-day factor, a melt factor of daily snowmelt when warm enough to melt.
-#' @param G_init double, Initial snowpack 
+#' @param W_init double, initial W
+#' @param G_init double, initial G
 #' @return list, water balance variables including 'P', 'E', 'R', 'P2', 'Rs', 'Rss', 'Rg', 'Ei', 'Ec', 'Es', 'W', 'G', 'PET'  
 #' DTVGM_PML
 DTVGM_PML <- function(data, para, W_init = 0, G_init = 0) {
